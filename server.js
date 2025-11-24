@@ -6,7 +6,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 // --- Config ---
 const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY =
-  process.env.GEMINI_API_KEY || "AIzaSyBiaX_hSjEeDYER8MpI-Qk-Ci5nOi6SBqov"; // replace for local tests if you want
+  process.env.GEMINI_API_KEY; // replace for local tests if you want
 
 if (!GEMINI_API_KEY || GEMINI_API_KEY.length < 20) {
   console.warn("⚠️ GEMINI_API_KEY is not configured. Set it in env for production.");
