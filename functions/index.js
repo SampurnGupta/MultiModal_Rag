@@ -134,7 +134,37 @@ exports.chatRag = onRequest(async (req, res) => {
   const { chatModel, embeddingModel } = getGeminiClients();
 
   try {
-    // ✅ NEW embedContent shape: { content: { role, parts } }
+    const normalized = message.trim().toLowerCase();
+    const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+    const isGreeting = /^(hi+|hello+|hey+|yo+|sup|good (morning|evening|afternoon|night))\b/.test(
+      normalized
+    );
+
+    // 1) Handle pure greetings WITHOUT RAG so you don't get weird facts for "hi"
+    if (isGreeting && wordCount <= 5) {
+      const resp = await chatModel.generateContent({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `The user greeted you with: "${message}". 
+Reply with a short, friendly greeting (1–2 sentences) and briefly explain that you are a multimodal RAG chatbot that can answer questions about their uploaded text, images (via OCR), and audio transcripts.`,
+              },
+            ],
+          },
+        ],
+      });
+
+      const text =
+        resp.response?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        "Hi! I’m your multimodal RAG assistant. You can upload text, images or audio and then ask questions about them.";
+      res.json({ answer: text, topChunks: [] });
+      return;
+    }
+
+    // 2) Normal RAG path
+    // Embed the user question
     const embRes = await embeddingModel.embedContent({
       content: {
         role: "user",
@@ -143,12 +173,12 @@ exports.chatRag = onRequest(async (req, res) => {
     });
     const queryEmbedding = embRes.embedding.values;
 
-    // 2) Fetch all chunks from Firestore (fine for small demo)
+    // Fetch all chunks from Firestore (fine for small demo)
     const snap = await db.collection("rag_chunks").get();
     const docs = [];
     snap.forEach((d) => docs.push({ id: d.id, ...d.data() }));
 
-    // 3) Compute similarity & pick top K
+    // Compute similarity & pick top K
     const scored = docs.map((d) => ({
       ...d,
       score: Array.isArray(d.embedding)
@@ -168,8 +198,13 @@ exports.chatRag = onRequest(async (req, res) => {
       .join("\n\n");
 
     const prompt = `
-You are a helpful assistant using Retrieval-Augmented Generation (RAG).
-You MUST answer using ONLY the context below. If the answer is not in the context, say that you don't know.
+You are a helpful assistant that answers questions about the user's uploaded content (documents, OCR text from images, and audio transcripts).
+
+Use the "Context" below to ground your answer:
+- Prefer information that clearly matches the user's question.
+- If the answer is not clearly supported by the context, say you don't know.
+- Write in a natural, conversational tone.
+- Keep answers concise (1–3 sentences).
 
 User question:
 ${message}

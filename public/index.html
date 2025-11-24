@@ -4,63 +4,526 @@
   <meta charset="utf-8" />
   <title>Multimodal RAG Chatbot</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 16px; }
-    h1 { text-align: center; }
-    .section { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-    .flex { display: flex; gap: 12px; flex-wrap: wrap; }
-    .chat { border: 1px solid #ccc; padding: 8px; height: 300px; overflow-y: auto; margin-bottom: 8px; background: #fafafa; }
-    .msg-user { text-align: right; margin: 4px 0; }
-    .msg-bot  { text-align: left;  margin: 4px 0; }
-    .small { font-size: 12px; color: #666; }
-    button { cursor: pointer; }
-  </style>
+  
   <!-- Tesseract.js for OCR (free, client-side) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <!-- PDF.js for PDF text extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <!-- Mammoth.js for DOCX text extraction -->
+  <script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+
+  <style>
+    :root {
+      --bg-gradient: radial-gradient(circle at 0% 0%, #1e293b 0, #020617 40%, #020617 100%);
+      --accent: #22c55e;
+      --accent-soft: rgba(34, 197, 94, 0.15);
+      --accent-strong: rgba(34, 197, 94, 0.3);
+      --card-bg: rgba(15, 23, 42, 0.8);
+      --border-subtle: rgba(148, 163, 184, 0.25);
+      --text-main: #e5e7eb;
+      --text-muted: #9ca3af;
+      --chat-bg: rgba(15, 23, 42, 0.85);
+      --radius-xl: 18px;
+      --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.6);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      color: var(--text-main);
+      background: var(--bg-gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      overflow-x: hidden;
+    }
+
+    /* Background orbs */
+    .bg-orb {
+      position: fixed;
+      border-radius: 999px;
+      filter: blur(40px);
+      opacity: 0.5;
+      pointer-events: none;
+      z-index: -1;
+    }
+    .bg-orb.orb-1 {
+      width: 420px;
+      height: 420px;
+      background: rgba(34, 197, 94, 0.3);
+      top: -60px;
+      left: -80px;
+    }
+    .bg-orb.orb-2 {
+      width: 380px;
+      height: 380px;
+      background: rgba(59, 130, 246, 0.25);
+      bottom: -80px;
+      right: -60px;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: 1100px;
+      background: linear-gradient(135deg, rgba(15,23,42,0.95), rgba(15,23,42,0.75));
+      border-radius: 24px;
+      border: 1px solid rgba(148,163,184,0.35);
+      box-shadow: var(--shadow-soft);
+      padding: 24px 24px 20px;
+      position: relative;
+      overflow: hidden;
+      backdrop-filter: blur(18px);
+      animation: shell-in 0.5s ease-out;
+    }
+
+    @keyframes shell-in {
+      from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.99);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .shell-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .title-block h1 {
+      margin: 0;
+      font-size: 1.6rem;
+      letter-spacing: 0.02em;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .title-pill {
+      font-size: 0.75rem;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.6);
+      color: var(--text-muted);
+    }
+    .subtitle {
+      margin: 6px 0 0;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .status-pill {
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(22, 163, 74, 0.15);
+      border: 1px solid rgba(34,197,94,0.5);
+      color: #bbf7d0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 10px rgba(34,197,94,0.9);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+      gap: 18px;
+    }
+
+    @media (max-width: 900px) {
+      .main-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .shell {
+        padding: 18px 16px 16px;
+      }
+    }
+
+    .section {
+      border-radius: var(--radius-xl);
+      padding: 14px 14px 12px;
+      background: var(--card-bg);
+      border: 1px solid var(--border-subtle);
+      position: relative;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .section-title {
+      font-size: 0.95rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .section-title span.badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.85);
+      border: 1px solid rgba(148,163,184,0.45);
+      color: var(--text-muted);
+    }
+
+    .section-subtitle {
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .flex-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .input-card {
+      flex: 1 1 180px;
+      background: rgba(15,23,42,0.7);
+      border-radius: 14px;
+      border: 1px solid rgba(55,65,81,0.7);
+      padding: 10px 10px 9px;
+      font-size: 0.85rem;
+    }
+    .input-card-title {
+      font-weight: 500;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .pill-tag {
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148,163,184,0.4);
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    input[type="file"] {
+      width: 100%;
+      font-size: 0.8rem;
+      margin-top: 4px;
+      color: var(--text-muted);
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      outline: none;
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #022c22;
+      box-shadow: 0 0 0 1px rgba(34,197,94,0.45), 0 12px 24px rgba(22,163,74,0.35);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-1px);
+      filter: brightness(1.05);
+      box-shadow: 0 0 0 1px rgba(34,197,94,0.6), 0 14px 28px rgba(22,163,74,0.5);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(0);
+      box-shadow: 0 0 0 1px rgba(34,197,94,0.6), 0 8px 16px rgba(22,163,74,0.5);
+    }
+
+    button.secondary {
+      background: rgba(15,23,42,0.9);
+      color: var(--text-main);
+      box-shadow: 0 0 0 1px rgba(148,163,184,0.5);
+    }
+    button.secondary:hover:not(:disabled) {
+      box-shadow: 0 0 0 1px rgba(148,163,184,0.7), 0 12px 24px rgba(15,23,42,0.8);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+      transform: none;
+      box-shadow: 0 0 0 1px rgba(148,163,184,0.25);
+    }
+
+    .small {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Chat section */
+    .chat-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .chat {
+      border-radius: 16px;
+      padding: 10px;
+      background: var(--chat-bg);
+      border: 1px solid rgba(31,41,55,0.9);
+      height: 320px;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .chat-empty-hint {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      pointer-events: none;
+    }
+
+    .msg-user,
+    .msg-bot {
+      margin: 4px 0;
+      display: flex;
+    }
+    .msg-user {
+      justify-content: flex-end;
+    }
+    .msg-bot {
+      justify-content: flex-start;
+    }
+
+    .bubble {
+      max-width: 78%;
+      border-radius: 16px;
+      padding: 7px 10px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      position: relative;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+
+    .bubble-user {
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #052e16;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble-bot {
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(55,65,81,0.9);
+      border-bottom-left-radius: 4px;
+    }
+
+    .chat-input-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    #chatInput {
+      flex: 1;
+      border-radius: 999px;
+      border: 1px solid rgba(75,85,99,0.9);
+      padding: 7px 12px;
+      background: rgba(15,23,42,0.9);
+      color: var(--text-main);
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    }
+    #chatInput::placeholder {
+      color: rgba(148,163,184,0.7);
+    }
+    #chatInput:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-soft), 0 0 0 4px rgba(34,197,94,0.15);
+      background: rgba(15,23,42,1);
+    }
+
+    .footer-note {
+      margin-top: 8px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .footer-note a {
+      color: var(--accent);
+      text-decoration: none;
+      opacity: 0.8;
+    }
+    .footer-note a:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+  </style>
 </head>
 <body>
-  <h1>Multimodal RAG Chatbot</h1>
+  <!-- Background orbs -->
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
 
-  <div class="section">
-    <h2>1. Add Knowledge</h2>
-    <div class="flex">
-      <div>
-        <p><b>Text file (.txt for now)</b></p>
-        <input type="file" id="textFileInput" accept=".txt" />
-        <button id="uploadTextBtn">Upload Text</button>
+  <div class="shell">
+    <div class="shell-header">
+      <div class="title-block">
+        <h1>
+          Multimodal RAG Chatbot
+          <span class="title-pill">Text · Image · Audio</span>
+        </h1>
+        <p class="subtitle">Upload knowledge as files, screenshots or speech, then chat with it in one place.</p>
       </div>
-
-      <div>
-        <p><b>Image (OCR → text)</b></p>
-        <input type="file" id="imageInput" accept="image/*" />
-        <button id="ocrBtn">Extract & Upload</button>
-        <div id="ocrStatus" class="small"></div>
-      </div>
-
-      <div>
-        <p><b>Audio (mic → text)</b></p>
-        <button id="audioBtn">🎙 Start/Stop Recording</button>
-        <div id="audioText" class="small"></div>
-        <button id="sendAudioTextBtn">Upload Audio Text</button>
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        Local demo running
       </div>
     </div>
-  </div>
 
-  <div class="section">
-    <h2>2. Chat with your data</h2>
-    <div id="chat" class="chat"></div>
-    <div class="flex">
-      <input type="text" id="chatInput" style="flex: 1" placeholder="Ask something..." />
-      <button id="sendChatBtn">Send</button>
+    <div class="main-grid">
+      <!-- LEFT: Ingestion -->
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <div class="section-title">
+              1 · Add knowledge
+              <span class="badge">Index your own content</span>
+            </div>
+            <p class="section-subtitle">All inputs are converted to text and stored as chunks for retrieval.</p>
+          </div>
+        </div>
+
+        <div class="flex-row">
+          <!-- Text upload -->
+          <div class="input-card">
+            <div class="input-card-title">
+              <span>Text files</span>
+              <!-- <span class="pill-tag">.txt · .pdf · .docx</span> -->
+              <input type="file" id="textFileInput" accept=".txt,.pdf,.docx" />
+            </div>
+            <!-- <input type="file" id="textFileInput" accept=".txt" /> -->
+            <div style="margin-top: 8px; display: flex; justify-content: flex-end;">
+              <button id="uploadTextBtn">
+                <span>Upload & index</span>
+              </button>
+            </div>
+            <div class="small">supports .txt, .pdf and .docx.</div>
+          </div>
+
+          <!-- Image OCR -->
+          <div class="input-card">
+            <div class="input-card-title">
+              <span>Images</span>
+              <span class="pill-tag">OCR in browser</span>
+            </div>
+            <input type="file" id="imageInput" accept="image/*" />
+            <div style="margin-top: 8px; display: flex; justify-content: flex-end; gap: 6px;">
+              <button id="ocrBtn" class="secondary">
+                <span>Extract & index</span>
+              </button>
+            </div>
+            <div id="ocrStatus" class="small"></div>
+          </div>
+
+          <!-- Audio -->
+          <div class="input-card">
+            <div class="input-card-title">
+              <span>Audio (mic)</span>
+              <span class="pill-tag">Web Speech API</span>
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button id="audioBtn" class="secondary">
+                🎙 Start / Stop
+              </button>
+              <button id="sendAudioTextBtn">
+                Upload transcript
+              </button>
+            </div>
+            <div id="audioText" class="small"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Chat -->
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <div class="section-title">
+              2 · Chat with your data
+              <span class="badge">RAG over indexed chunks</span>
+            </div>
+            <p class="section-subtitle">Questions are embedded, matched against stored chunks, then answered with Gemini.</p>
+          </div>
+        </div>
+
+        <div class="chat-wrapper">
+          <div id="chat" class="chat">
+            <div class="chat-empty-hint">
+              Start by uploading a small text file or image,<br />
+              then ask something like “What did I just upload?”
+            </div>
+          </div>
+
+          <div class="chat-input-row">
+            <input type="text" id="chatInput" placeholder="Ask something about your uploaded content..." />
+            <button id="sendChatBtn">
+              Send
+            </button>
+          </div>
+          <div id="chatStatus" class="small"></div>
+        </div>
+      </section>
     </div>
-    <div id="chatStatus" class="small"></div>
+
+    <div class="footer-note">
+      <span>Multimodal RAG demo · Powered by Firebase, Firestore, Tesseract.js & Gemini.</span>
+      <span>Tip: keep files small (demo-scale) for best performance.</span>
+    </div>
   </div>
 
   <script>
-    // 👇 After deployment, set this to your functions base URL.
-    // For now keep it empty; it will work if we set up rewrites or test via emulator.
-    // Example after deploy:
-    // const FUNCTIONS_BASE = "https://<region>-<project-id>.cloudfunctions.net";
+    // Configure PDF.js worker
+    if (window['pdfjsLib']) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    }
+
+    // 👇 After deployment, you can still keep this empty because Hosting rewrites
+    // /ingestText and /chatRag to the corresponding Cloud Functions.
     const FUNCTIONS_BASE = "";
 
     const textFileInput = document.getElementById("textFileInput");
@@ -79,11 +542,23 @@
     const sendChatBtn = document.getElementById("sendChatBtn");
     const chatStatus = document.getElementById("chatStatus");
 
+    function clearEmptyHint() {
+      const hint = chatDiv.querySelector(".chat-empty-hint");
+      if (hint) hint.remove();
+    }
+
     function addChatMessage(text, from = "bot") {
-      const div = document.createElement("div");
-      div.className = from === "user" ? "msg-user" : "msg-bot";
-      div.textContent = (from === "user" ? "You: " : "Bot: ") + text;
-      chatDiv.appendChild(div);
+      clearEmptyHint();
+      const wrapper = document.createElement("div");
+      wrapper.className = from === "user" ? "msg-user" : "msg-bot";
+
+      const bubble = document.createElement("div");
+      bubble.className =
+        "bubble " + (from === "user" ? "bubble-user" : "bubble-bot");
+      bubble.textContent = text;
+
+      wrapper.appendChild(bubble);
+      chatDiv.appendChild(wrapper);
       chatDiv.scrollTop = chatDiv.scrollHeight;
     }
 
@@ -107,29 +582,90 @@
       return resp.json();
     }
 
-    // ---- Text file upload (.txt only for now) ----
+    // ---- Text / PDF / DOCX upload ----
     uploadTextBtn.onclick = async () => {
       const file = textFileInput.files[0];
-      if (!file) { alert("Select a .txt file first"); return; }
-      const text = await file.text();
-      uploadTextBtn.disabled = true;
-      uploadTextBtn.textContent = "Uploading...";
+      if (!file) {
+        alert("Select a file first");
+        return;
+      }
+
+      const fileName = file.name || "file";
+      const ext = fileName.split(".").pop().toLowerCase();
+
+      let text = "";
+
       try {
-        await callIngestText(text, "doc", file.name);
+        if (ext === "txt") {
+          // Plain text
+          text = await file.text();
+
+        } else if (ext === "pdf") {
+          // PDF → text via PDF.js
+          if (!window.pdfjsLib) {
+            alert("PDF.js not loaded");
+            return;
+          }
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          let fullText = "";
+
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const content = await page.getTextContent();
+            const strings = content.items.map((item) => item.str);
+            fullText += strings.join(" ") + "\n";
+          }
+
+          text = fullText;
+
+        } else if (ext === "docx") {
+          // DOCX → text via Mammoth.js
+          if (!window.mammoth) {
+            alert("Mammoth.js not loaded");
+            return;
+          }
+          const arrayBuffer = await file.arrayBuffer();
+          const result = await window.mammoth.extractRawText({ arrayBuffer });
+          text = result.value || "";
+
+        } else {
+          alert("Unsupported file type. Use .txt, .pdf or .docx");
+          return;
+        }
+      } catch (err) {
+        console.error("Error reading file:", err);
+        alert("Error reading file content.");
+        return;
+      }
+
+      if (!text || !text.trim()) {
+        alert("No text found in the file.");
+        return;
+      }
+
+      uploadTextBtn.disabled = true;
+      uploadTextBtn.textContent = "Indexing...";
+
+      try {
+        await callIngestText(text, "doc", fileName);
         alert("Text ingested successfully");
       } catch (e) {
         console.error(e);
         alert("Error ingesting text");
       } finally {
         uploadTextBtn.disabled = false;
-        uploadTextBtn.textContent = "Upload Text";
+        uploadTextBtn.textContent = "Upload & index";
       }
     };
 
     // ---- Image OCR with Tesseract.js ----
     ocrBtn.onclick = async () => {
       const file = imageInput.files[0];
-      if (!file) { alert("Select an image first"); return; }
+      if (!file) {
+        alert("Select an image first");
+        return;
+      }
 
       ocrStatus.textContent = "Running OCR...";
       try {
@@ -143,7 +679,7 @@
           return;
         }
         await callIngestText(text, "image", file.name);
-        ocrStatus.textContent += " | Uploaded to RAG";
+        ocrStatus.textContent += " · Uploaded to RAG";
       } catch (e) {
         console.error(e);
         ocrStatus.textContent = "Error running OCR";
@@ -156,7 +692,8 @@
     let audioTextBuffer = "";
 
     if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
       recognition = new SpeechRecognition();
       recognition.lang = "en-US";
       recognition.interimResults = true;
@@ -176,12 +713,12 @@
 
       recognition.onend = () => {
         listening = false;
-        audioBtn.textContent = "🎙 Start Recording";
+        audioBtn.textContent = "🎙 Start / Stop";
       };
-
     } else {
       audioBtn.disabled = true;
-      audioTextDiv.textContent = "Web Speech API not supported in this browser.";
+      audioTextDiv.textContent =
+        "Web Speech API not supported in this browser (try Chrome).";
     }
 
     audioBtn.onclick = () => {
@@ -191,7 +728,7 @@
         audioTextDiv.textContent = "Listening...";
         recognition.start();
         listening = true;
-        audioBtn.textContent = "■ Stop Recording";
+        audioBtn.textContent = "■ Stop";
       } else {
         recognition.stop();
       }
