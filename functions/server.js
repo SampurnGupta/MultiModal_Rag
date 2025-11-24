@@ -1,38 +1,43 @@
-const express = require("express");
-const cors = require("cors");
+// Add this file to functions/server.js
+// (No github URL because this is a new file to add)
 require("dotenv").config();
 
+const express = require("express");
+const path = require("path");
 const admin = require("firebase-admin");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const cors = require("cors");
 
-// Initialize Firebase Admin using a service account JSON passed via env var
-// Set FIREBASE_SERVICE_ACCOUNT to the JSON string of the service account on Render
-const saJson = process.env.FIREBASE_SERVICE_ACCOUNT || null;
-if (saJson) {
-  try {
-    const sa = typeof saJson === "string" ? JSON.parse(saJson) : saJson;
-    if (!admin.apps.length) {
+// Initialize Firebase Admin:
+// If you provide FIREBASE_SERVICE_ACCOUNT_JSON in Render env, use that.
+// Otherwise try default application credentials (may not work on Render).
+if (!admin.apps.length) {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    try {
+      const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
       admin.initializeApp({
         credential: admin.credential.cert(sa),
+        // optional: databaseURL: process.env.FIREBASE_DATABASE_URL
       });
+      console.log("Initialized firebase-admin from FIREBASE_SERVICE_ACCOUNT_JSON");
+    } catch (err) {
+      console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", err);
+      // fallback to default
+      admin.initializeApp();
     }
-  } catch (e) {
-    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT:", e);
-    process.exit(1);
+  } else {
+    admin.initializeApp();
+    console.log("Initialized firebase-admin with default credentials");
   }
-} else {
-  // Fallback to default application credentials (if available)
-  if (!admin.apps.length) admin.initializeApp();
 }
-
 const db = admin.firestore();
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 if (!GEMINI_API_KEY) {
-  console.warn("⚠️ GEMINI_API_KEY is not set in env");
+  console.warn("⚠️ GEMINI_API_KEY is not set in environment");
 }
 
-// helpers (copied from your functions/index.js)
+// Cosine similarity
 function cosineSimilarity(a, b) {
   const len = Math.min(a.length, b.length);
   let dot = 0;
@@ -46,6 +51,8 @@ function cosineSimilarity(a, b) {
   if (!na || !nb) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
+
+// Chunk long text
 function chunkText(text, maxChars = 800) {
   const chunks = [];
   let start = 0;
@@ -55,6 +62,8 @@ function chunkText(text, maxChars = 800) {
   }
   return chunks;
 }
+
+// Gemini helpers
 function getGeminiClients() {
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   const chatModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -65,30 +74,36 @@ function getGeminiClients() {
 }
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.use(cors()); // allow all origins by default; tighten later if needed
+app.use(express.json({ limit: "10mb" }));
 
-// serve static client
-app.use(express.static("public"));
-
-// POST /ingestText
+// ---- 1) Ingest text: POST /ingestText ----
 app.post("/ingestText", async (req, res) => {
   const { text, sourceType = "doc", sourceName = "unknown" } = req.body || {};
   if (!text || !text.trim()) {
     res.status(400).send("Missing text");
     return;
   }
+
   const { embeddingModel } = getGeminiClients();
+
   try {
     const chunks = chunkText(text);
+
+    // Use batch embed API like in the original code
     const batchRes = await embeddingModel.batchEmbedContents({
       requests: chunks.map((c) => ({
-        content: { role: "user", parts: [{ text: c }] },
+        content: {
+          role: "user",
+          parts: [{ text: c }],
+        },
       })),
     });
+
     const embeddings = batchRes.embeddings || [];
     const batch = db.batch();
     const col = db.collection("rag_chunks");
+
     chunks.forEach((chunk, i) => {
       const emb = embeddings[i]?.values || [];
       const docRef = col.doc();
@@ -100,22 +115,25 @@ app.post("/ingestText", async (req, res) => {
         createdAt: Date.now(),
       });
     });
+
     await batch.commit();
     res.json({ ok: true, chunks: chunks.length });
   } catch (err) {
-    console.error("Error in ingestText:", err);
+    console.error("Error in /ingestText:", err);
     res.status(500).send("Error ingesting text");
   }
 });
 
-// POST /chatRag
+// ---- 2) Chat with RAG: POST /chatRag ----
 app.post("/chatRag", async (req, res) => {
   const { message } = req.body || {};
   if (!message || !message.trim()) {
     res.status(400).send("Missing message");
     return;
   }
+
   const { chatModel, embeddingModel } = getGeminiClients();
+
   try {
     const normalized = message.trim().toLowerCase();
     const wordCount = normalized.split(/\s+/).filter(Boolean).length;
@@ -123,6 +141,7 @@ app.post("/chatRag", async (req, res) => {
       normalized
     );
 
+    // greeting shortcut
     if (isGreeting && wordCount <= 5) {
       const resp = await chatModel.generateContent({
         contents: [
@@ -130,24 +149,30 @@ app.post("/chatRag", async (req, res) => {
             role: "user",
             parts: [
               {
-                text: `The user greeted you with: "${message}". Reply with a short, friendly greeting (1–2 sentences) and briefly explain that you are a multimodal RAG chatbot that can answer questions about their uploaded text, images (via OCR), and audio transcripts.`,
+                text: `The user greeted you with: "${message}". Reply with a short, friendly greeting (1–2 sentences) and briefly explain that you are a multimodal RAG chatbot.`,
               },
             ],
           },
         ],
       });
+
       const text =
         resp.response?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        "Hi! I’m your multimodal RAG assistant. You can upload text, images or audio and then ask questions about them.";
+        "Hi! I’m your multimodal RAG assistant.";
       res.json({ answer: text, topChunks: [] });
       return;
     }
 
+    // embed the question
     const embRes = await embeddingModel.embedContent({
-      content: { role: "user", parts: [{ text: message }] },
+      content: {
+        role: "user",
+        parts: [{ text: message }],
+      },
     });
     const queryEmbedding = embRes.embedding.values;
 
+    // fetch chunks (small demo; may need paging for large datasets)
     const snap = await db.collection("rag_chunks").get();
     const docs = [];
     snap.forEach((d) => docs.push({ id: d.id, ...d.data() }));
@@ -187,8 +212,7 @@ ${contextText}
     });
 
     const text =
-      resp.response?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "(no answer)";
+      resp.response?.candidates?.[0]?.content?.parts?.[0]?.text || "(no answer)";
 
     res.json({
       answer: text,
@@ -200,12 +224,27 @@ ${contextText}
       })),
     });
   } catch (err) {
-    console.error("Error in chatRag:", err);
+    console.error("Error in /chatRag:", err);
     res.status(500).send("Error generating answer");
   }
 });
 
+// Serve static frontend from ../public
+const publicPath = path.join(__dirname, "..", "public");
+app.use(express.static(publicPath));
+
+// SPA fallback - send index.html for unknown routes (optional)
+app.get("*", (req, res) => {
+  const indexFile = path.join(publicPath, "index.html");
+  if (require("fs").existsSync(indexFile)) {
+    res.sendFile(indexFile);
+  } else {
+    res.status(404).send("Not found");
+  }
+});
+
+// Start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Server listening on ${port}`);
+  console.log(`Server listening on port ${port}`);
 });
