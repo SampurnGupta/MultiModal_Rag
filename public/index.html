@@ -1,89 +1,240 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Welcome to Firebase Hosting</title>
+<head>
+  <meta charset="utf-8" />
+  <title>Multimodal RAG Chatbot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 16px; }
+    h1 { text-align: center; }
+    .section { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+    .flex { display: flex; gap: 12px; flex-wrap: wrap; }
+    .chat { border: 1px solid #ccc; padding: 8px; height: 300px; overflow-y: auto; margin-bottom: 8px; background: #fafafa; }
+    .msg-user { text-align: right; margin: 4px 0; }
+    .msg-bot  { text-align: left;  margin: 4px 0; }
+    .small { font-size: 12px; color: #666; }
+    button { cursor: pointer; }
+  </style>
+  <!-- Tesseract.js for OCR (free, client-side) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+  <h1>Multimodal RAG Chatbot</h1>
 
-    <!-- update the version number as needed -->
-    <script defer src="/__/firebase/12.6.0/firebase-app-compat.js"></script>
-    <!-- include only the Firebase features as you need -->
-    <script defer src="/__/firebase/12.6.0/firebase-auth-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-database-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-firestore-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-functions-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-messaging-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-storage-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-analytics-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-remote-config-compat.js"></script>
-    <script defer src="/__/firebase/12.6.0/firebase-performance-compat.js"></script>
-    <!-- 
-      initialize the SDK after all desired features are loaded, set useEmulator to false
-      to avoid connecting the SDK to running emulators.
-    -->
-    <script defer src="/__/firebase/init.js?useEmulator=true"></script>
+  <div class="section">
+    <h2>1. Add Knowledge</h2>
+    <div class="flex">
+      <div>
+        <p><b>Text file (.txt for now)</b></p>
+        <input type="file" id="textFileInput" accept=".txt" />
+        <button id="uploadTextBtn">Upload Text</button>
+      </div>
 
-    <style media="screen">
-      body { background: #ECEFF1; color: rgba(0,0,0,0.87); font-family: Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; }
-      #message { background: white; max-width: 360px; margin: 100px auto 16px; padding: 32px 24px; border-radius: 3px; }
-      #message h2 { color: #ffa100; font-weight: bold; font-size: 16px; margin: 0 0 8px; }
-      #message h1 { font-size: 22px; font-weight: 300; color: rgba(0,0,0,0.6); margin: 0 0 16px;}
-      #message p { line-height: 140%; margin: 16px 0 24px; font-size: 14px; }
-      #message a { display: block; text-align: center; background: #039be5; text-transform: uppercase; text-decoration: none; color: white; padding: 16px; border-radius: 4px; }
-      #message, #message a { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); }
-      #load { color: rgba(0,0,0,0.4); text-align: center; font-size: 13px; }
-      @media (max-width: 600px) {
-        body, #message { margin-top: 0; background: white; box-shadow: none; }
-        body { border-top: 16px solid #ffa100; }
-      }
-    </style>
-  </head>
-  <body>
-    <div id="message">
-      <h2>Welcome</h2>
-      <h1>Firebase Hosting Setup Complete</h1>
-      <p>You're seeing this because you've successfully setup Firebase Hosting. Now it's time to go build something extraordinary!</p>
-      <a target="_blank" href="https://firebase.google.com/docs/hosting/">Open Hosting Documentation</a>
+      <div>
+        <p><b>Image (OCR → text)</b></p>
+        <input type="file" id="imageInput" accept="image/*" />
+        <button id="ocrBtn">Extract & Upload</button>
+        <div id="ocrStatus" class="small"></div>
+      </div>
+
+      <div>
+        <p><b>Audio (mic → text)</b></p>
+        <button id="audioBtn">🎙 Start/Stop Recording</button>
+        <div id="audioText" class="small"></div>
+        <button id="sendAudioTextBtn">Upload Audio Text</button>
+      </div>
     </div>
-    <p id="load">Firebase SDK Loading&hellip;</p>
+  </div>
 
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        const loadEl = document.querySelector('#load');
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-        // // The Firebase SDK is initialized and available here!
-        //
-        // firebase.auth().onAuthStateChanged(user => { });
-        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
-        // firebase.firestore().doc('/foo/bar').get().then(() => { });
-        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
-        // firebase.messaging().requestPermission().then(() => { });
-        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
-        // firebase.analytics(); // call to activate
-        // firebase.analytics().logEvent('tutorial_completed');
-        // firebase.performance(); // call to activate
-        //
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+  <div class="section">
+    <h2>2. Chat with your data</h2>
+    <div id="chat" class="chat"></div>
+    <div class="flex">
+      <input type="text" id="chatInput" style="flex: 1" placeholder="Ask something..." />
+      <button id="sendChatBtn">Send</button>
+    </div>
+    <div id="chatStatus" class="small"></div>
+  </div>
 
-        try {
-          let app = firebase.app();
-          let features = [
-            'auth', 
-            'database', 
-            'firestore',
-            'functions',
-            'messaging', 
-            'storage', 
-            'analytics', 
-            'remoteConfig',
-            'performance',
-          ].filter(feature => typeof app[feature] === 'function');
-          loadEl.textContent = `Firebase SDK loaded with ${features.join(', ')}`;
-        } catch (e) {
-          console.error(e);
-          loadEl.textContent = 'Error loading the Firebase SDK, check the console.';
-        }
+  <script>
+    // 👇 After deployment, set this to your functions base URL.
+    // For now keep it empty; it will work if we set up rewrites or test via emulator.
+    // Example after deploy:
+    // const FUNCTIONS_BASE = "https://<region>-<project-id>.cloudfunctions.net";
+    const FUNCTIONS_BASE = "";
+
+    const textFileInput = document.getElementById("textFileInput");
+    const uploadTextBtn = document.getElementById("uploadTextBtn");
+
+    const imageInput = document.getElementById("imageInput");
+    const ocrBtn = document.getElementById("ocrBtn");
+    const ocrStatus = document.getElementById("ocrStatus");
+
+    const audioBtn = document.getElementById("audioBtn");
+    const audioTextDiv = document.getElementById("audioText");
+    const sendAudioTextBtn = document.getElementById("sendAudioTextBtn");
+
+    const chatDiv = document.getElementById("chat");
+    const chatInput = document.getElementById("chatInput");
+    const sendChatBtn = document.getElementById("sendChatBtn");
+    const chatStatus = document.getElementById("chatStatus");
+
+    function addChatMessage(text, from = "bot") {
+      const div = document.createElement("div");
+      div.className = from === "user" ? "msg-user" : "msg-bot";
+      div.textContent = (from === "user" ? "You: " : "Bot: ") + text;
+      chatDiv.appendChild(div);
+      chatDiv.scrollTop = chatDiv.scrollHeight;
+    }
+
+    async function callIngestText(text, sourceType, sourceName) {
+      const resp = await fetch(`${FUNCTIONS_BASE}/ingestText`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, sourceType, sourceName }),
       });
-    </script>
-  </body>
+      if (!resp.ok) throw new Error("Ingest failed");
+      return resp.json();
+    }
+
+    async function callChatRag(message) {
+      const resp = await fetch(`${FUNCTIONS_BASE}/chatRag`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (!resp.ok) throw new Error("Chat failed");
+      return resp.json();
+    }
+
+    // ---- Text file upload (.txt only for now) ----
+    uploadTextBtn.onclick = async () => {
+      const file = textFileInput.files[0];
+      if (!file) { alert("Select a .txt file first"); return; }
+      const text = await file.text();
+      uploadTextBtn.disabled = true;
+      uploadTextBtn.textContent = "Uploading...";
+      try {
+        await callIngestText(text, "doc", file.name);
+        alert("Text ingested successfully");
+      } catch (e) {
+        console.error(e);
+        alert("Error ingesting text");
+      } finally {
+        uploadTextBtn.disabled = false;
+        uploadTextBtn.textContent = "Upload Text";
+      }
+    };
+
+    // ---- Image OCR with Tesseract.js ----
+    ocrBtn.onclick = async () => {
+      const file = imageInput.files[0];
+      if (!file) { alert("Select an image first"); return; }
+
+      ocrStatus.textContent = "Running OCR...";
+      try {
+        const imgUrl = URL.createObjectURL(file);
+        const result = await Tesseract.recognize(imgUrl, "eng");
+        const text = result.data.text;
+        ocrStatus.textContent = "Extracted text length: " + text.length;
+
+        if (!text.trim()) {
+          alert("No text detected in image");
+          return;
+        }
+        await callIngestText(text, "image", file.name);
+        ocrStatus.textContent += " | Uploaded to RAG";
+      } catch (e) {
+        console.error(e);
+        ocrStatus.textContent = "Error running OCR";
+      }
+    };
+
+    // ---- Audio with Web Speech API ----
+    let recognition = null;
+    let listening = false;
+    let audioTextBuffer = "";
+
+    if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = true;
+      recognition.continuous = true;
+
+      recognition.onresult = (event) => {
+        let finalTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) finalTranscript += transcript + " ";
+        }
+        if (finalTranscript) {
+          audioTextBuffer += finalTranscript;
+          audioTextDiv.textContent = "Transcript: " + audioTextBuffer;
+        }
+      };
+
+      recognition.onend = () => {
+        listening = false;
+        audioBtn.textContent = "🎙 Start Recording";
+      };
+
+    } else {
+      audioBtn.disabled = true;
+      audioTextDiv.textContent = "Web Speech API not supported in this browser.";
+    }
+
+    audioBtn.onclick = () => {
+      if (!recognition) return;
+      if (!listening) {
+        audioTextBuffer = "";
+        audioTextDiv.textContent = "Listening...";
+        recognition.start();
+        listening = true;
+        audioBtn.textContent = "■ Stop Recording";
+      } else {
+        recognition.stop();
+      }
+    };
+
+    sendAudioTextBtn.onclick = async () => {
+      if (!audioTextBuffer.trim()) {
+        alert("No transcribed text yet");
+        return;
+      }
+      try {
+        await callIngestText(audioTextBuffer, "audio", "mic");
+        alert("Audio text uploaded to RAG");
+      } catch (e) {
+        console.error(e);
+        alert("Error uploading audio text");
+      }
+    };
+
+    // ---- Chat ----
+    async function sendChat() {
+      const msg = chatInput.value.trim();
+      if (!msg) return;
+      addChatMessage(msg, "user");
+      chatInput.value = "";
+      chatStatus.textContent = "Thinking...";
+      sendChatBtn.disabled = true;
+      try {
+        const resp = await callChatRag(msg);
+        addChatMessage(resp.answer || "(no answer)", "bot");
+      } catch (e) {
+        console.error(e);
+        addChatMessage("Error getting answer", "bot");
+      } finally {
+        chatStatus.textContent = "";
+        sendChatBtn.disabled = false;
+      }
+    }
+
+    sendChatBtn.onclick = sendChat;
+    chatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendChat();
+    });
+  </script>
+</body>
 </html>
