@@ -1,0 +1,27 @@
+{
+  "name": "multimodal_ragchatbot",
+  "version": "1.0.0",
+  "description": "*A simple, modern chatbot that can understand text, images & audio — built with Firebase, Firestore, Gemini & OCR.*",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SampurnGupta/MultiModal_Rag.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/SampurnGupta/MultiModal_Rag/issues"
+  },
+  "homepage": "https://github.com/SampurnGupta/MultiModal_Rag#readme",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  }
+}
